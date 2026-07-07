@@ -52,6 +52,22 @@ jobs:
           find . -type f -path "*/build/*.cs3" -exec cp {} "$GITHUB_WORKSPACE/builds/" \;
           cp build/plugins.json "$GITHUB_WORKSPACE/builds"
 
+      - name: Generate repository manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > "$GITHUB_WORKSPACE/builds/repository.json" <<EOF
+          {
+            "name": "DizipalExtension",
+            "description": "Dizipal film ve dizi eklentisi",
+            "iconUrl": "https://upload.wikimedia.org/wikipedia/commons/2/2f/Korduene_Logo.png",
+            "manifestVersion": 1,
+            "pluginLists": [
+              "https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/builds/plugins.json"
+            ]
+          }
+          EOF
+
       - name: Push builds
         run: |
           cd $GITHUB_WORKSPACE/builds
