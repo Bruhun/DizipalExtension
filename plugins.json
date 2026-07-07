@@ -1,0 +1,23 @@
+[
+    {
+        "iconUrl": "https://upload.wikimedia.org/wikipedia/commons/2/2f/Korduene_Logo.png",
+        "fileHash": "sha256-dc5e9580f881183dea7b69f4e9bcbf8c72b6c5a62ce80c4bbac71f077142ccb0",
+        "apiVersion": 1,
+        "repositoryUrl": "https://github.com/Bruhun/DizipalExtension",
+        "fileSize": 35605,
+        "status": 1,
+        "language": "tr",
+        "authors": [
+            "YourName"
+        ],
+        "tvTypes": [
+            "Movie",
+            "TvSeries"
+        ],
+        "version": 1,
+        "internalName": "ExampleProvider",
+        "description": "Dizipal film ve dizi eklentisi",
+        "url": "https://raw.githubusercontent.com/Bruhun/DizipalExtension/builds/ExampleProvider.cs3",
+        "name": "ExampleProvider"
+    }
+]
