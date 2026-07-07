@@ -13,8 +13,9 @@ buildscript {
 
     dependencies {
         classpath("com.android.tools.build:gradle:8.7.3")
-        // Cloudstream gradle plugin which makes everything work and builds plugins
-        classpath("com.github.recloudstream:gradle:-SNAPSHOT")
+        // Cloudstream gradle plugin which makes everything work and builds plugins.
+        // Pinned to a commit before the AGP 9.x update to stay compatible with this project's AGP 8.7.3.
+        classpath("com.github.recloudstream:gradle:69fdb8fc4b")
         classpath("org.jetbrains.kotlin:kotlin-gradle-plugin:2.2.0")
     }
 }
@@ -71,8 +72,10 @@ subprojects {
         val cloudstream by configurations
         val implementation by configurations
 
-        // Stubs for all cloudstream classes
-        cloudstream("com.github.recloudstream:cloudstream:master-SNAPSHOT")
+        // Stubs for all cloudstream classes.
+        // Pinned to the pre-release tag because master-SNAPSHOT is not a valid GitHub release tag
+        // and the gradle plugin downloads classes.jar from the release assets.
+        cloudstream("com.github.recloudstream:cloudstream:pre-release")
 
         // These dependencies can include any of those which are added by the app,
         // but you don't need to include any of them if you don't need them.
