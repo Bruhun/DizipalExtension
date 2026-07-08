@@ -1,6 +1,7 @@
 package com.example
 
 import android.content.Context
+import com.example.plugin.Dizipal2084Provider
 import com.example.plugin.DizipalProvider
 import com.lagradost.cloudstream3.plugins.CloudstreamPlugin
 import com.lagradost.cloudstream3.plugins.Plugin
@@ -10,5 +11,6 @@ class ExamplePlugin : Plugin() {
     override fun load(context: Context) {
         // Ana sağlayıcıyı sisteme kaydet
         registerMainAPI(DizipalProvider())
+        registerMainAPI(Dizipal2084Provider())
     }
 }
