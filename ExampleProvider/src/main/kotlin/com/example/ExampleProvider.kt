@@ -5,10 +5,13 @@ import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.fasterxml.jackson.module.kotlin.readValue
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.*
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
 import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
 import java.net.URLEncoder
-import kotlinx.coroutines.delay
 
 class DizipalProvider : MainAPI() {
     override var mainUrl = "https://dizipal2096.com"
@@ -19,22 +22,9 @@ class DizipalProvider : MainAPI() {
 
     private val mapper = jacksonObjectMapper()
 
-    private val headers = mapOf(
-        "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "Accept" to "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-        "Accept-Language" to "tr-TR,tr;q=0.9,en-US;q=0.8,en;q=0.7"
-    )
-
-    private val ajaxHeaders = mapOf(
-        "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "Accept" to "application/json, text/javascript, */*; q=0.01",
-        "Accept-Language" to "tr-TR,tr;q=0.9,en-US;q=0.8,en;q=0.7",
-        "X-Requested-With" to "XMLHttpRequest"
-    )
-
     // ================= 1. HOME PAGE =================
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
-        val document = app.get(mainUrl, headers = headers, referer = "$mainUrl/").document
+        val document = app.get(mainUrl, headers = DizipalUtils.headers, referer = "$mainUrl/").document
         val latestEpisodes = document.select(".ip-ep-card").mapNotNull { parseEpisodeCard(it) }
         if (latestEpisodes.isEmpty()) throw ErrorLoadingException("Ana sayfa y\u00fcklenemedi")
         return newHomePageResponse(HomePageList("Son B\u00f6l\u00fcmler", latestEpisodes), false)
@@ -49,7 +39,7 @@ class DizipalProvider : MainAPI() {
             ?: element.selectFirst("img")?.attr("alt")?.trim()
             ?: return null
 
-        val poster = extractImage(element.selectFirst("img"))
+        val poster = DizipalUtils.extractImage(element.selectFirst("img"), mainUrl)
 
         return newTvSeriesSearchResponse(title, href, TvType.TvSeries) {
             this.posterUrl = poster
@@ -60,7 +50,7 @@ class DizipalProvider : MainAPI() {
     override suspend fun search(query: String): List<SearchResponse> {
         val encodedQuery = URLEncoder.encode(query, "UTF-8")
         val searchUrl = "$mainUrl/arama?q=$encodedQuery&ajax=1"
-        val response = app.get(searchUrl, headers = ajaxHeaders, referer = "$mainUrl/")
+        val response = app.get(searchUrl, headers = DizipalUtils.ajaxHeaders, referer = "$mainUrl/")
 
         val results: List<SearchJson> = try {
             mapper.readValue(response.text)
@@ -93,7 +83,7 @@ class DizipalProvider : MainAPI() {
             "/dizi/" in fixedUrl -> loadSeriesPage(fixedUrl)
             "/film/" in fixedUrl -> loadMoviePage(fixedUrl)
             else -> {
-                val document = app.get(fixedUrl, headers = headers, referer = "$mainUrl/").document
+                val document = app.get(fixedUrl, headers = DizipalUtils.headers, referer = "$mainUrl/").document
                 if (document.selectFirst(".dp-season-btns") != null) {
                     loadSeriesPage(fixedUrl, document)
                 } else {
@@ -104,7 +94,7 @@ class DizipalProvider : MainAPI() {
     }
 
     private suspend fun loadSeriesPage(url: String, document: Document? = null): LoadResponse? {
-        val doc = document ?: app.get(url, headers = headers, referer = "$mainUrl/").document
+        val doc = document ?: app.get(url, headers = DizipalUtils.headers, referer = "$mainUrl/").document
         val title = doc.selectFirst("h1.dp-series-title")?.text()?.trim()
             ?: throw ErrorLoadingException("Dizi ba\u015fl\u0131\u011f\u0131 bulunamad\u0131")
 
@@ -127,67 +117,26 @@ class DizipalProvider : MainAPI() {
             seasonNumbers.add(1)
         }
 
-        var apiSucceeded = false
-        for (season in seasonNumbers) {
-            val episodes: List<EpisodeJson> = try {
-                val epResponse = app.get(
-                    "$mainUrl/bolum_yukle.php?slug=${URLEncoder.encode(slug, "UTF-8")}&sezon=$season",
-                    headers = ajaxHeaders,
-                    referer = url
-                )
-                mapper.readValue(epResponse.text)
-            } catch (_: Exception) {
-                emptyList()
-            }
+        val allSeasons = seasonNumbers.toMutableSet()
 
-            if (episodes.isNotEmpty()) {
-                apiSucceeded = true
-                episodes.forEachIndexed { index, ep ->
-                    episodeList.add(
-                        newEpisode(fixUrl("/bolum/${ep.slug}")) {
-                            this.name = ep.baslik ?: "Sezon $season B\u00f6l\u00fcm ${index + 1}"
-                            this.season = season
-                            this.episode = index + 1
-                        }
-                    )
-                }
-            }
+        try {
+            val s1e1Url = fixUrl("/bolum/$slug-1-sezon-1-bolum")
+            val s1e1Doc = app.get(s1e1Url, headers = DizipalUtils.headers, referer = url).document
+            s1e1Doc.select(".bp-stab").mapNotNull { tab ->
+                tab.attr("data-season").toIntOrNull()
+            }.forEach { allSeasons.add(it) }
+        } catch (_: Exception) {
         }
 
-        if (!apiSucceeded) {
-            val allSeasons = seasonNumbers.toMutableSet()
-            try {
-                val s1e1Url = fixUrl("/bolum/$slug-1-sezon-1-bolum")
-                val s1e1Doc = app.get(s1e1Url, headers = headers, referer = url).document
-                s1e1Doc.select(".bp-stab").mapNotNull { tab ->
-                    tab.attr("data-season").toIntOrNull()
-                }.forEach { allSeasons.add(it) }
-            } catch (_: Exception) {
-            }
+        val sortedSeasons = allSeasons.sorted()
 
-            val sortedSeasons = allSeasons.sorted()
-
-            for (season in sortedSeasons) {
-                var episodeNum = 1
-                var consecutiveFails = 0
-                while (consecutiveFails < 5 && episodeNum <= 30) {
-                    delay(400L)
-                    val epUrl = fixUrl("/bolum/$slug-$season-sezon-$episodeNum-bolum")
-                    val epTitle = fetchEpisodeTitle(epUrl, url)
-                    if (!epTitle.isNullOrBlank()) {
-                        consecutiveFails = 0
-                        episodeList.add(
-                            newEpisode(epUrl) {
-                                this.name = epTitle
-                                this.season = season
-                                this.episode = episodeNum
-                            }
-                        )
-                    } else {
-                        consecutiveFails++
+        coroutineScope {
+            sortedSeasons.chunked(2).forEach { batch ->
+                batch.map { season ->
+                    async {
+                        discoverSeasonEpisodes(season, slug, url)
                     }
-                    episodeNum++
-                }
+                }.awaitAll().forEach { eps -> episodeList.addAll(eps) }
             }
         }
 
@@ -202,13 +151,49 @@ class DizipalProvider : MainAPI() {
         }
     }
 
+    private suspend fun discoverSeasonEpisodes(season: Int, slug: String, referer: String): List<Episode> {
+        val episodes = ArrayList<Episode>()
+        var episodeNum = 1
+        var consecutiveFails = 0
+        while (consecutiveFails < 5 && episodeNum <= 30) {
+            delay(250L)
+            val epUrl = fixUrl("/bolum/$slug-$season-sezon-$episodeNum-bolum")
+            val epTitle = fetchEpisodeTitle(epUrl, referer)
+            if (!epTitle.isNullOrBlank()) {
+                consecutiveFails = 0
+                episodes.add(
+                    newEpisode(epUrl) {
+                        this.name = epTitle
+                        this.season = season
+                        this.episode = episodeNum
+                    }
+                )
+            } else {
+                consecutiveFails++
+            }
+            episodeNum++
+        }
+        return episodes
+    }
+
+    private suspend fun fetchEpisodeTitle(epUrl: String, referer: String): String? {
+        suspend fun attempt(): String? {
+            val epDoc = app.get(epUrl, headers = DizipalUtils.headers, referer = referer).document
+            return epDoc.selectFirst("h1.bp-ep-title, h1.dp-series-title")?.text()?.trim()
+        }
+        return try { attempt() } catch (_: Exception) {
+            delay(1000L)
+            try { attempt() } catch (_: Exception) { null }
+        }
+    }
+
     private suspend fun loadMoviePage(url: String, document: Document? = null): LoadResponse? {
-        val doc = document ?: app.get(url, headers = headers, referer = "$mainUrl/").document
+        val doc = document ?: app.get(url, headers = DizipalUtils.headers, referer = "$mainUrl/").document
         val title = doc.selectFirst("h1.fp-title")?.text()?.trim()
             ?: throw ErrorLoadingException("Film ba\u015fl\u0131\u011f\u0131 bulunamad\u0131")
 
         val poster = doc.selectFirst("meta[property=og:image]")?.attr("content")
-            ?: doc.selectFirst(".fp-poster img")?.let { extractImage(it) }
+            ?: doc.selectFirst(".fp-poster img")?.let { DizipalUtils.extractImage(it, mainUrl) }
 
         val description = doc.selectFirst("meta[name=description]")?.attr("content")?.trim()
 
@@ -237,7 +222,7 @@ class DizipalProvider : MainAPI() {
                 "$mainUrl/api/embed.php?slug=${URLEncoder.encode(slug, "UTF-8")}&domain=$mainUrl&type=dizi"
             }
             else -> {
-                val doc = app.get(fixedData, headers = headers, referer = "$mainUrl/").document
+                val doc = app.get(fixedData, headers = DizipalUtils.headers, referer = "$mainUrl/").document
                 val iframeSrc = doc.selectFirst("iframe")?.attr("src")
                 if (iframeSrc != null) return resolveEmbed(fixUrl(iframeSrc), callback)
                 return false
@@ -249,7 +234,7 @@ class DizipalProvider : MainAPI() {
 
     private suspend fun resolveEmbed(embedUrl: String, callback: (ExtractorLink) -> Unit): Boolean {
         return try {
-            val html = app.get(embedUrl, headers = headers, referer = "$mainUrl/").text
+            val html = app.get(embedUrl, headers = DizipalUtils.headers, referer = "$mainUrl/").text
             val hlsUrl = Regex("""var src\s*=\s*["']([^"']+)["']""").find(html)?.groupValues?.get(1)
 
             if (!hlsUrl.isNullOrBlank()) {
@@ -273,29 +258,7 @@ class DizipalProvider : MainAPI() {
         }
     }
 
-    // ================= HELPERS =================
-    private suspend fun fetchEpisodeTitle(epUrl: String, referer: String): String? {
-        suspend fun attempt(): String? {
-            val epDoc = app.get(epUrl, headers = headers, referer = referer).document
-            return epDoc.selectFirst("h1.bp-ep-title, h1.dp-series-title")?.text()?.trim()
-        }
-        return try { attempt() } catch (_: Exception) {
-            delay(1200L)
-            try { attempt() } catch (_: Exception) { null }
-        }
-    }
-
-    private fun extractImage(img: Element?): String? {
-        if (img == null) return null
-        val src = img.attr("data-src").ifBlank { img.attr("src") }
-        return when {
-            src.isBlank() -> null
-            src.startsWith("http") -> src
-            src.startsWith("//") -> "https:$src"
-            else -> mainUrl + src
-        }
-    }
-
+    // ================= DATA CLASSES =================
     data class SearchJson(
         @JsonProperty("slug") val slug: String,
         @JsonProperty("title") val title: String,

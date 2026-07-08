@@ -13,15 +13,9 @@ class Dizipal2084Provider : MainAPI() {
     override var lang = "tr"
     override val supportedTypes = setOf(TvType.TvSeries, TvType.Movie)
 
-    private val headers = mapOf(
-        "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "Accept" to "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-        "Accept-Language" to "tr-TR,tr;q=0.9,en-US;q=0.8,en;q=0.7"
-    )
-
     // ================= 1. HOME PAGE =================
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
-        val document = app.get(mainUrl, headers = headers, referer = "$mainUrl/").document
+        val document = app.get(mainUrl, headers = DizipalUtils.headers, referer = "$mainUrl/").document
         val homePageList = ArrayList<HomePageList>()
 
         val trendingItems = document.select("a.trending-item").mapNotNull { parseTrendingCard(it) }
@@ -39,11 +33,10 @@ class Dizipal2084Provider : MainAPI() {
     }
 
     private fun parseTrendingCard(element: Element): SearchResponse? {
-        val href = element.attr("href").takeIf { it.isNotBlank() } ?: return null
-        val url = fixUrl(href)
+        val url = fixUrlNull(element.attr("href").takeIf { it.isNotBlank() } ?: return null) ?: return null
         val title = element.selectFirst(".trending-title")?.text()?.trim() ?: return null
         val badge = element.selectFirst(".trending-badge")?.text()?.trim()?.lowercase() ?: ""
-        val poster = element.selectFirst("img")?.let { extractImage(it) }
+        val poster = element.selectFirst("img")?.let { DizipalUtils.extractImage(it, mainUrl) }
         val type = if (badge.contains("film")) TvType.Movie else TvType.TvSeries
 
         return if (type == TvType.Movie) {
@@ -54,12 +47,11 @@ class Dizipal2084Provider : MainAPI() {
     }
 
     private fun parseContentCard(element: Element): SearchResponse? {
-        val href = element.attr("href").takeIf { it.isNotBlank() } ?: return null
-        val url = fixUrl(href)
+        val url = fixUrlNull(element.attr("href").takeIf { it.isNotBlank() } ?: return null) ?: return null
         val title = element.selectFirst(".card-title")?.text()?.trim() ?: return null
         val badge = element.selectFirst(".card-badge")?.text()?.trim()?.lowercase() ?: ""
-        val poster = element.selectFirst("img")?.let { extractImage(it) }
-        val type = if (badge.contains("film") || href.contains("/film/")) TvType.Movie else TvType.TvSeries
+        val poster = element.selectFirst("img")?.let { DizipalUtils.extractImage(it, mainUrl) }
+        val type = if (badge.contains("film") || url.contains("/film/")) TvType.Movie else TvType.TvSeries
 
         return if (type == TvType.Movie) {
             newMovieSearchResponse(title, url, TvType.Movie) { this.posterUrl = poster }
@@ -72,8 +64,7 @@ class Dizipal2084Provider : MainAPI() {
     override suspend fun search(query: String): List<SearchResponse> {
         val encodedQuery = URLEncoder.encode(query, "UTF-8")
         val searchUrl = "$mainUrl/arama?q=$encodedQuery"
-        val document = app.get(searchUrl, headers = headers, referer = "$mainUrl/").document
-
+        val document = app.get(searchUrl, headers = DizipalUtils.headers, referer = "$mainUrl/").document
         return document.select(".content-card a.card-link").mapNotNull { parseContentCard(it) }
     }
 
@@ -85,7 +76,7 @@ class Dizipal2084Provider : MainAPI() {
             "/dizi/" in fixedUrl -> loadSeriesPage(fixedUrl)
             "/film/" in fixedUrl -> loadMoviePage(fixedUrl)
             else -> {
-                val document = app.get(fixedUrl, headers = headers, referer = "$mainUrl/").document
+                val document = app.get(fixedUrl, headers = DizipalUtils.headers, referer = "$mainUrl/").document
                 if (document.selectFirst(".season-buttons") != null) {
                     loadSeriesPage(fixedUrl, document)
                 } else {
@@ -96,7 +87,7 @@ class Dizipal2084Provider : MainAPI() {
     }
 
     private suspend fun loadSeriesPage(url: String, document: Document? = null): LoadResponse? {
-        val doc = document ?: app.get(url, headers = headers, referer = "$mainUrl/").document
+        val doc = document ?: app.get(url, headers = DizipalUtils.headers, referer = "$mainUrl/").document
 
         val title = doc.selectFirst("h1.page-title, h1.series-title, meta[property=\"og:title\"]")?.let {
             if (it.tagName() == "meta") it.attr("content").replace(" izle | Dizipal", "").trim()
@@ -104,7 +95,7 @@ class Dizipal2084Provider : MainAPI() {
         } ?: throw ErrorLoadingException("Ba\u015fl\u0131k bulunamad\u0131")
 
         val poster = doc.selectFirst("meta[property=\"og:image\"]")?.attr("content")
-            ?: doc.selectFirst(".series-poster img, .detail-poster img")?.let { extractImage(it) }
+            ?: doc.selectFirst(".series-poster img, .detail-poster img")?.let { DizipalUtils.extractImage(it, mainUrl) }
 
         val description = doc.selectFirst("meta[property=\"og:description\"]")?.attr("content")?.trim()
             ?: doc.selectFirst(".series-description, .detail-description")?.text()?.trim()
@@ -147,7 +138,7 @@ class Dizipal2084Provider : MainAPI() {
     }
 
     private suspend fun loadMoviePage(url: String, document: Document? = null): LoadResponse? {
-        val doc = document ?: app.get(url, headers = headers, referer = "$mainUrl/").document
+        val doc = document ?: app.get(url, headers = DizipalUtils.headers, referer = "$mainUrl/").document
 
         val title = doc.selectFirst("h1.page-title, meta[property=\"og:title\"]")?.let {
             if (it.tagName() == "meta") it.attr("content").replace(" izle | Dizipal", "").trim()
@@ -184,7 +175,7 @@ class Dizipal2084Provider : MainAPI() {
         val embedUrl = "$mainUrl/api/embed.php?slug=${URLEncoder.encode(slug, "UTF-8")}&domain=$mainUrl&type=$type"
 
         return try {
-            val html = app.get(embedUrl, headers = headers, referer = "$mainUrl/").text
+            val html = app.get(embedUrl, headers = DizipalUtils.headers, referer = "$mainUrl/").text
             val hlsUrl = Regex("""var src\s*=\s*["']([^"']+)["']""").find(html)?.groupValues?.get(1)
 
             if (!hlsUrl.isNullOrBlank()) {
@@ -205,18 +196,6 @@ class Dizipal2084Provider : MainAPI() {
             }
         } catch (_: Exception) {
             false
-        }
-    }
-
-    // ================= HELPERS =================
-    private fun extractImage(img: Element?): String? {
-        if (img == null) return null
-        val src = img.attr("data-src").ifBlank { img.attr("src") }
-        return when {
-            src.isBlank() -> null
-            src.startsWith("http") -> src
-            src.startsWith("//") -> "https:$src"
-            else -> mainUrl + src
         }
     }
 }
