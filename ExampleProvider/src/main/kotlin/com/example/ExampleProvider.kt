@@ -119,45 +119,73 @@ class DizipalProvider : MainAPI() {
 
         val episodeList = ArrayList<Episode>()
         val slug = url.substringAfter("$mainUrl/dizi/").substringAfter("/dizi/").trim('/')
+        val seasonNumbers = doc.select(".dp-season-btn").mapNotNull { btn ->
+            btn.attr("data-season").toIntOrNull()
+        }.toMutableList()
+        if (seasonNumbers.isEmpty()) {
+            seasonNumbers.add(1)
+        }
 
-        doc.select(".dp-season-btn").forEach { seasonBtn ->
-            val seasonNumber = seasonBtn.attr("data-season").toIntOrNull()
-                ?: seasonBtn.text().filter { it.isDigit() }.toIntOrNull()
-                ?: return@forEach
-
+        var apiSucceeded = false
+        for (season in seasonNumbers) {
             val episodes: List<EpisodeJson> = try {
                 val epResponse = app.get(
-                    "$mainUrl/bolum_yukle.php?slug=${URLEncoder.encode(slug, "UTF-8")}&sezon=$seasonNumber",
+                    "$mainUrl/bolum_yukle.php?slug=${URLEncoder.encode(slug, "UTF-8")}&sezon=$season",
                     headers = ajaxHeaders,
                     referer = url
                 )
                 mapper.readValue(epResponse.text)
             } catch (_: Exception) {
-                emptyList<EpisodeJson>()
+                emptyList()
             }
 
-            episodes.forEachIndexed { index, ep ->
-                episodeList.add(
-                    newEpisode(fixUrl("/bolum/${ep.slug}")) {
-                        this.name = ep.baslik ?: "Sezon $seasonNumber B\u00f6l\u00fcm ${index + 1}"
-                        this.season = seasonNumber
-                        this.episode = index + 1
+            if (episodes.isNotEmpty()) {
+                apiSucceeded = true
+                episodes.forEachIndexed { index, ep ->
+                    episodeList.add(
+                        newEpisode(fixUrl("/bolum/${ep.slug}")) {
+                            this.name = ep.baslik ?: "Sezon $season B\u00f6l\u00fcm ${index + 1}"
+                            this.season = season
+                            this.episode = index + 1
+                        }
+                    )
+                }
+            }
+        }
+
+        if (!apiSucceeded) {
+            for (season in seasonNumbers) {
+                var episodeNum = 1
+                var consecutiveFails = 0
+                while (consecutiveFails < 10 && episodeNum <= 100) {
+                    val epUrl = fixUrl("/bolum/$slug-$season-sezon-$episodeNum-bolum")
+                    val found = try {
+                        val epDoc = app.get(epUrl, headers = headers, referer = url).document
+                        val hasPlayer = epDoc.selectFirst("iframe") != null
+                        if (hasPlayer) {
+                            val epTitle = epDoc.selectFirst("title")?.text()?.trim()
+                                ?.replace(Regex("\\s*\\|.*$"), "")
+                                ?: "$season. Sezon $episodeNum. B\u00f6l\u00fcm"
+                            episodeList.add(
+                                newEpisode(epUrl) {
+                                    this.name = epTitle
+                                    this.season = season
+                                    this.episode = episodeNum
+                                }
+                            )
+                        }
+                        hasPlayer
+                    } catch (_: Exception) {
+                        false
                     }
-                )
+                    if (found) consecutiveFails = 0 else consecutiveFails++
+                    episodeNum++
+                }
             }
         }
 
         if (episodeList.isEmpty()) {
-            doc.select(".dp-hero-btns a[href*=/bolum/]").forEachIndexed { index, btn ->
-                val epUrl = fixUrl(btn.attr("href"))
-                episodeList.add(
-                    newEpisode(epUrl) {
-                        this.name = btn.text().trim()
-                        this.season = 1
-                        this.episode = index + 1
-                    }
-                )
-            }
+            throw ErrorLoadingException("Hi\u00e7 b\u00f6l\u00fcm bulunamad\u0131")
         }
 
         return newTvSeriesLoadResponse(title, url, TvType.TvSeries, episodeList) {
