@@ -161,11 +161,8 @@ class DizipalProvider : MainAPI() {
                     val epUrl = fixUrl("/bolum/$slug-$season-sezon-$episodeNum-bolum")
                     val found = try {
                         val epDoc = app.get(epUrl, headers = headers, referer = url).document
-                        val hasPlayer = epDoc.selectFirst("iframe") != null
-                        if (hasPlayer) {
-                            val epTitle = epDoc.selectFirst("title")?.text()?.trim()
-                                ?.replace(Regex("\\s*\\|.*$"), "")
-                                ?: "$season. Sezon $episodeNum. B\u00f6l\u00fcm"
+                        val epTitle = epDoc.selectFirst("h1.bp-ep-title, h1.dp-series-title")?.text()?.trim()
+                        if (!epTitle.isNullOrBlank()) {
                             episodeList.add(
                                 newEpisode(epUrl) {
                                     this.name = epTitle
@@ -174,7 +171,7 @@ class DizipalProvider : MainAPI() {
                                 }
                             )
                         }
-                        hasPlayer
+                        epTitle != null
                     } catch (_: Exception) {
                         false
                     }
