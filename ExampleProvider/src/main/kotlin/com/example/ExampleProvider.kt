@@ -8,6 +8,7 @@ import com.lagradost.cloudstream3.utils.*
 import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
 import java.net.URLEncoder
+import kotlinx.coroutines.delay
 
 class DizipalProvider : MainAPI() {
     override var mainUrl = "https://dizipal2096.com"
@@ -154,10 +155,15 @@ class DizipalProvider : MainAPI() {
         }
 
         if (!apiSucceeded) {
-            for (season in seasonNumbers) {
+            val maxBtnSeason = seasonNumbers.maxOrNull() ?: 1
+            val allSeasons = (seasonNumbers + ((maxBtnSeason + 1)..(maxBtnSeason + 8)).toList()).distinct().sorted()
+
+            for (season in allSeasons) {
                 var episodeNum = 1
                 var consecutiveFails = 0
+                var seasonHadEpisodes = false
                 while (consecutiveFails < 10 && episodeNum <= 100) {
+                    delay(150L)
                     val epUrl = fixUrl("/bolum/$slug-$season-sezon-$episodeNum-bolum")
                     val found = try {
                         val epDoc = app.get(epUrl, headers = headers, referer = url).document
@@ -175,9 +181,11 @@ class DizipalProvider : MainAPI() {
                     } catch (_: Exception) {
                         false
                     }
-                    if (found) consecutiveFails = 0 else consecutiveFails++
+                    if (found) { consecutiveFails = 0; seasonHadEpisodes = true }
+                    else consecutiveFails++
                     episodeNum++
                 }
+                if (!seasonHadEpisodes && season > maxBtnSeason) break
             }
         }
 
