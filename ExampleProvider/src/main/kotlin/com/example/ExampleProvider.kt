@@ -155,37 +155,39 @@ class DizipalProvider : MainAPI() {
         }
 
         if (!apiSucceeded) {
-            val maxBtnSeason = seasonNumbers.maxOrNull() ?: 1
-            val allSeasons = (seasonNumbers + ((maxBtnSeason + 1)..(maxBtnSeason + 8)).toList()).distinct().sorted()
+            val allSeasons = seasonNumbers.toMutableSet()
+            try {
+                val s1e1Url = fixUrl("/bolum/$slug-1-sezon-1-bolum")
+                val s1e1Doc = app.get(s1e1Url, headers = headers, referer = url).document
+                s1e1Doc.select(".bp-stab").mapNotNull { tab ->
+                    tab.attr("data-season").toIntOrNull()
+                }.forEach { allSeasons.add(it) }
+            } catch (_: Exception) {
+            }
 
-            for (season in allSeasons) {
+            val sortedSeasons = allSeasons.sorted()
+
+            for (season in sortedSeasons) {
                 var episodeNum = 1
                 var consecutiveFails = 0
-                var seasonHadEpisodes = false
-                while (consecutiveFails < 10 && episodeNum <= 100) {
-                    delay(150L)
+                while (consecutiveFails < 5 && episodeNum <= 30) {
+                    delay(400L)
                     val epUrl = fixUrl("/bolum/$slug-$season-sezon-$episodeNum-bolum")
-                    val found = try {
-                        val epDoc = app.get(epUrl, headers = headers, referer = url).document
-                        val epTitle = epDoc.selectFirst("h1.bp-ep-title, h1.dp-series-title")?.text()?.trim()
-                        if (!epTitle.isNullOrBlank()) {
-                            episodeList.add(
-                                newEpisode(epUrl) {
-                                    this.name = epTitle
-                                    this.season = season
-                                    this.episode = episodeNum
-                                }
-                            )
-                        }
-                        epTitle != null
-                    } catch (_: Exception) {
-                        false
+                    val epTitle = fetchEpisodeTitle(epUrl, url)
+                    if (!epTitle.isNullOrBlank()) {
+                        consecutiveFails = 0
+                        episodeList.add(
+                            newEpisode(epUrl) {
+                                this.name = epTitle
+                                this.season = season
+                                this.episode = episodeNum
+                            }
+                        )
+                    } else {
+                        consecutiveFails++
                     }
-                    if (found) { consecutiveFails = 0; seasonHadEpisodes = true }
-                    else consecutiveFails++
                     episodeNum++
                 }
-                if (!seasonHadEpisodes && season > maxBtnSeason) break
             }
         }
 
@@ -272,6 +274,17 @@ class DizipalProvider : MainAPI() {
     }
 
     // ================= HELPERS =================
+    private suspend fun fetchEpisodeTitle(epUrl: String, referer: String): String? {
+        suspend fun attempt(): String? {
+            val epDoc = app.get(epUrl, headers = headers, referer = referer).document
+            return epDoc.selectFirst("h1.bp-ep-title, h1.dp-series-title")?.text()?.trim()
+        }
+        return try { attempt() } catch (_: Exception) {
+            delay(1200L)
+            try { attempt() } catch (_: Exception) { null }
+        }
+    }
+
     private fun extractImage(img: Element?): String? {
         if (img == null) return null
         val src = img.attr("data-src").ifBlank { img.attr("src") }
